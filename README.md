@@ -3,7 +3,10 @@
 Canny Edge Detection Implementation! 
 
 ## Environment Setup
-```conda install -c conda-forge opencv```
+```
+conda install -c conda-forge opencv
+conda install -c anaconda scikit-image
+```
 
 ## Resources
 

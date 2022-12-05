@@ -1,6 +1,6 @@
 # canny_edge_detection
 
-Canny Edge Detection Implementation! 
+Canny Edge Detection implementation combined with a custom path finding algorithm! 
 
 ## Examples
 

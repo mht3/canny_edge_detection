@@ -1,9 +1,12 @@
 import numpy as np
 from scipy import ndimage
 from matplotlib import pyplot as plt
+from matplotlib import animation
 import cv2
 import argparse
 from skimage import transform
+from skimage.morphology import skeletonize, dilation, erosion, closing, disk
+import sys
 
 class Sobel():
     def __init__(self, filepath, size, norm=True):
@@ -209,20 +212,85 @@ class Canny(Sobel):
         output = self._hysteresis(suppressed_img, self.threshold)
         return output
 
-def plot(image, output):
+def plot(image, output, vmin=0, vmax=255, both_grey=False):
 
     fig = plt.figure(figsize=(6, 8))
     # Left and right subplots
     ax1 = fig.add_subplot(121)
     ax2 = fig.add_subplot(122)
     # Original image
-    ax1.imshow(image)
+    if both_grey:
+        ax1.imshow(image, cmap='gray', vmin=vmin, vmax=vmax)
+    else:
+        ax1.imshow(image)
+       
     # Model output for comparison
-    ax2.imshow(output, cmap='gray', vmin=0, vmax=255)
+    ax2.imshow(output, cmap='gray', vmin=vmin, vmax=vmax)
     ax1.set_axis_off()
     ax2.set_axis_off()
-
     plt.show()
+
+def recursive_draw(image, i, j, visited_arr, movements):
+    # Base cases: Pixel has been visited
+    if visited_arr[i, j] == 1:
+        return
+    # Otherwise, if pixel has NOT been visited
+    # add coordinate to movement path and center to xy plane
+    movements.append((j - image.shape[1] // 2, -i + image.shape[0] // 2))
+    # Flag as visited
+    visited_arr[i, j] = True
+
+    # Continue going through neighbors
+    for k in range(i - 1, i + 2):
+        for m in range(j - 1, j + 2):
+            out_of_bounds = (k >= image.shape[1]) or (m >= image.shape[0]) or (m < 0) or (k < 0)
+            if out_of_bounds:
+                continue
+            neighbor = image[k, m]
+            if neighbor == 0:
+                visited_arr[k, m] = 1 
+            else:
+                recursive_draw(image, k, m, visited_arr, movements)
+
+
+def draw_lines(image):
+    '''
+    Function to get x-y move commands based off of edges in binary image.
+    '''
+    h, w = image.shape
+    # Array of visited locations
+    movements = []
+    visited_arr = np.zeros(shape=(h, w), dtype=np.uint8)
+    # While not all pixels have been visited
+    while (visited_arr != 1).all():
+        for i in range(w):
+            for j in range(h):
+                pixel = image[i, j]
+                if pixel == 1:
+                    recursive_draw(image, i, j, visited_arr, movements)
+                else:
+                    # Pixel value is 0. Simply check off value as visited because we don't care and move on
+                    visited_arr[i, j] = 1
+
+    return movements
+
+def final_postprocess(image):
+    footprint = disk(4)
+    # Option 1: dilation and skeletonization. Works for simple shapes
+    output = skeletonize(dilation(image, footprint)).astype(np.uint8)
+    # Option 2: Image Closing. Works for all images but not well for move commands
+    # output = erosion(dilation(uint8_output, footprint), footprint)
+    # Plot 
+    # plot(image, output, vmax=1, both_grey=True)
+    return output
+
+def get_move_data(image):
+    movements = draw_lines(image)
+    data = []
+    for i in range(0, len(movements), 20):
+        x, y = movements[i]
+        data.append((x, y))
+    return data
 
 if __name__ == '__main__':
 
@@ -248,13 +316,36 @@ if __name__ == '__main__':
     else:
         width = args.width
 
-    # image = transform.resize(image, (height, width), order=0)
-    # print(height, width)
+    image = transform.resize(image, (height, width), order=0)
+    
     # sobel = Sobel(filepath=args.filename, size=(height, width))
     # sobel_output = sobel()
-    
-    canny = Canny(filepath=args.filename, sigma=args.sigma, threshold=args.threshold, size=(height, width))
-    canny_output = canny()
-
     # plot(image, sobel_output)
-    plot(image, canny_output)
+
+    print("Running Edge Detector...")
+    canny = Canny(filepath=args.filename, sigma=args.sigma, threshold=args.threshold, size=(height, width))
+
+    canny_output = canny()
+    uint8_output = (canny_output / 255.).astype(np.uint8)
+    # final post-processing 
+    output = final_postprocess(uint8_output)
+    print("Converting to move commands...")
+    plot(image, output, vmax=1.)
+    data = get_move_data(output)
+    fig = plt.figure()
+    plt.axis('off')
+    plt.axis([0, height, 0, width])
+    plt.xlim([0, width])
+    plt.ylim([0, width])
+    plt.axis('equal')
+    def animation_func(coords):
+        x, y = coords
+        plt.scatter(x, y, color='b')
+    name = args.filename[:-4] + '.gif'
+
+    anim = animation.FuncAnimation(fig, animation_func, frames=data, interval=50)
+    anim.save(name)
+
+# python edge_detector.py -f data/circle.png -t 40 -s 1 --height=200 --width=200
+# python edge_detector.py -f data/hexagon.png -t 40 -s 1 --height=200 --width=200
+# python edge_detector.py -f data/google.png -t 40 -s 1 --height=200 --width=200
